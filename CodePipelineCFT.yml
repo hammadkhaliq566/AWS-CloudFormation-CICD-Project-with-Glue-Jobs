@@ -9,7 +9,7 @@ Parameters:
   GitHubOwner:
     Description: Name of GitHub Owner
     Type: String
-    Default: hammadkhaliq566
+    Default: 
   GitHubRepo:
     Description: Name of GitHub Repo
     Type: String
@@ -21,11 +21,11 @@ Parameters:
   GitHubOAuthToken:
     Type: String
     NoEcho: true
-    Default: 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
+    Default: 
   BuckerName:
     Description: S3 Bucket Name
     Type: String
-    Default: freelance-analytics-codebase
+    Default: 
 
 Resources:
   CodePipelineRole:
