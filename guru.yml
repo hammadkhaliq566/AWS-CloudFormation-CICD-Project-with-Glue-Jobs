@@ -1,0 +1,112 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Cloudformation template to create a data lake using AWS Glue and S3
+Parameters:
+  Environment:
+    Description: Parameter for environment prefix, default value dev
+    Type: String
+    Default: dev
+  Source:
+    Description: Name of the Data Source
+    Type: String
+    Default: guru
+  BucketName:
+    Description: Name of the Bucket
+    Type: String
+    Default: freelance-analytics-codebase
+  GlueWorkflowRoleParameter:
+    Description: Name of Glue Role
+    Type: String
+    
+###########################################################################
+ # AWS Resources
+###########################################################################
+
+Resources:
+
+###########################################################################
+ # AWS Glue Jobs
+###########################################################################
+
+  GuruDataIngest:
+    Type: AWS::Glue::Job
+    Properties: 
+      Command:
+        Name: pythonshell
+        PythonVersion: '3'
+        ScriptLocation: !Sub s3://${BucketName}/guru_handler.py
+      DefaultArguments:
+        "--incremental": "True"
+        "--workflow_name": !Sub ${Environment}-${Source}-workflow
+        "--extra-py-files": !Sub s3://${BucketName}/fa_guru_ingest.py,s3://${BucketName}/s3_utils.py
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1
+      GlueVersion : '1.0'
+      MaxRetries: 0
+      Name: !Sub ${Environment}-${Source}-jobs-data-ingest
+      Role: 
+        Fn::ImportValue:
+          Fn::Sub: "${GlueWorkflowRoleParameter}-Role"
+      Timeout: 2880
+
+  GuruDataCurated:
+    Type: AWS::Glue::Job
+    Properties: 
+      Command:
+        Name: glueetl
+        ScriptLocation: !Sub s3://${BucketName}/fa_guru_transformation.py
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1
+      GlueVersion : '2.0'
+      WorkerType: "G.1X" 
+      NumberOfWorkers: 2
+      MaxRetries: 0
+      Name: !Sub ${Environment}-${Source}-jobs-data-curated
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-disable"
+      Role:
+        Fn::ImportValue:
+          Fn::Sub: "${GlueWorkflowRoleParameter}-Role"
+      Timeout: 2880
+
+###########################################################################
+ # AWS Glue Workflows
+###########################################################################   
+
+  GuruWorkflow:
+    Type: AWS::Glue::Workflow
+    Properties:
+      Description: Fetching raw data from the guru.com platform and storing it in an s3 bucket after transformation
+      Name: !Sub ${Environment}-${Source}-workflow
+
+###########################################################################
+ # AWS Glue Triggers
+###########################################################################      
+
+  GuruIngestTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Description: To run guru raw data ingestion job
+      Type: SCHEDULED
+      Schedule: cron(0 12 * * ? *)
+      WorkflowName: !Ref GuruWorkflow
+      StartOnCreation: 'true'
+      Actions:
+        - JobName: !Sub ${Environment}-${Source}-jobs-data-ingest
+      Name: !Sub ${Environment}-${Source}-jobs-Ingest-trigger
+
+  GuruTransformationTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Type: CONDITIONAL
+      WorkflowName: !Ref GuruWorkflow
+      StartOnCreation: 'true'
+      Actions:
+        - JobName: !Sub ${Environment}-${Source}-jobs-data-curated
+      Predicate:
+        Conditions:
+          - LogicalOperator: EQUALS
+            JobName: !Sub ${Environment}-${Source}-jobs-data-ingest
+            State: SUCCEEDED
+        Logical: ANY
+      Name: !Sub ${Environment}-${Source}-jobs-transformation-trigger

@@ -1,0 +1,138 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Cloudformation template to create a data lake common resources like S3
+  buckets
+Parameters:
+  Environment:
+    Description: Parameter for environment prefix, default value dev
+    Type: String
+    Default: dev
+
+Resources:  
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Allow Glue to call AWS services on your behalf.
+      RoleName:
+        Fn::Join:
+        - "-"
+        - - Ref: Environment
+          - freelance-analytics-glue-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - glue.amazonaws.com
+            - lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: glue-policy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:DeleteObject
+            - s3:ListBucket
+            Resource: "*"
+          - Effect: Allow
+            Action:
+            - iam:PassRole
+            - iam:GetRole
+            Resource:
+            - arn:aws:iam::*:role/AWSGlueServiceRole*
+            - Fn::Join:
+              - ''
+              - - 'arn:aws:iam::'
+                - Ref: AWS::AccountId
+                - ":role/freelance-analytics-glue-role-dev"
+            Condition:
+              StringLike:
+                iam:PassedToService:
+                - glue.amazonaws.com
+          - Effect: Allow
+            Action:
+            - quicksight:PassDataSet
+            - quicksight:CreateIngestion
+            - quicksight:GetDashboardEmbedUrl
+            - quicksight:ListUserGroups
+            - quicksight:DescribeUser
+            - quicksight:GetAuthCode
+            - quicksight:ListTemplates
+            - quicksight:DescribeDashboard
+            - quicksight:ListGroups
+            - quicksight:DescribeAnalysisPermissions
+            - quicksight:ListThemeAliases
+            - quicksight:ListIAMPolicyAssignmentsForUser
+            - quicksight:DescribeDashboardPermissions
+            - quicksight:DescribeAccountCustomization
+            - quicksight:PassDataSource
+            - quicksight:ListTagsForResource
+            - quicksight:ListDataSets
+            - quicksight:ListUsers
+            - quicksight:ListTemplateAliases
+            - quicksight:ListIngestions
+            - quicksight:GetAnonymousUserEmbedUrl
+            - quicksight:ListAnalyses
+            - quicksight:GetSessionEmbedUrl
+            - quicksight:DescribeIngestion
+            - quicksight:ListIAMPolicyAssignments
+            - quicksight:DescribeGroup
+            - quicksight:DescribeAnalysis
+            - quicksight:GetGroupMapping
+            - quicksight:DescribeTheme
+            - quicksight:ListThemes
+            - quicksight:DescribeThemePermissions
+            - quicksight:DescribeTemplatePermissions
+            - quicksight:DescribeNamespace
+            - quicksight:ListThemeVersions
+            - quicksight:DescribeThemeAlias
+            - quicksight:SearchDashboards
+            - quicksight:DescribeIAMPolicyAssignment
+            - quicksight:ListDataSources
+            - quicksight:DescribeAccountSettings
+            - quicksight:DescribeDataSource
+            - quicksight:ListTemplateVersions
+            - quicksight:DescribeTemplate
+            - quicksight:ListGroupMemberships
+            - quicksight:ListDashboards
+            - quicksight:DescribeTemplateAlias
+            - quicksight:SearchDirectoryGroups
+            - quicksight:SearchAnalyses
+            - quicksight:ListDashboardVersions
+            - quicksight:DescribeDataSet
+            - quicksight:ListNamespaces
+            Resource: "*"
+          - Effect: Allow
+            Action:
+            - iam:PassRole
+            - iam:GetRole
+            Resource:
+              Fn::Join:
+              - ''
+              - - 'arn:aws:iam::'
+                - Ref: AWS::AccountId
+                - ":role/freelance-analytics-glue-role-dev"
+            Condition:
+              StringEquals:
+                iam:PassedToService: forecast.amazonaws.com
+      ManagedPolicyArns:
+  #    - arn:aws:iam::aws:policy/AWSGlueConsoleFullAccess
+      - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      - arn:aws:iam::aws:policy/AmazonS3FullAccess
+  #    - arn:aws:iam::aws:policy/AmazonSESFullAccess
+
+Outputs:
+  Role:
+    Description: Glue Role is common for other CFT
+    Value: 
+      'Fn::GetAtt':
+        - Role
+        - Arn
+    Export:
+      Name: 
+       Fn::Sub: "${AWS::StackName}-Role"

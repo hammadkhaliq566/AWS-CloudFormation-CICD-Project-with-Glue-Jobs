@@ -1,0 +1,182 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Cloudformation template to create a data lake using AWS Glue and S3
+Parameters:
+  Environment:
+    Description: Parameter for environment prefix, default value dev
+    Type: String
+    Default: dev
+  Source:
+    Description: Name of the Data Source
+    Type: String
+    Default: upwork
+  BucketName:
+    Description: Name of the Bucket
+    Type: String
+    Default: freelance-analytics-codebase
+  GlueWorkflowRoleParameter:
+    Description: Name of Glue Role
+    Type: String
+
+###########################################################################
+ # AWS Resources
+###########################################################################
+
+Resources:
+
+###########################################################################
+ # AWS Glue Jobs
+###########################################################################
+
+  JobsDataIngest:
+    Type: AWS::Glue::Job
+    Properties: 
+      Command:
+        Name: pythonshell
+        PythonVersion: '3'
+        ScriptLocation: !Sub s3://${BucketName}/main.py
+      DefaultArguments:
+        "--incremental": "True"
+        "--workflow_name": !Sub ${Environment}-${Source}-jobs-workflow
+        "--extra-py-files": !Sub s3://${BucketName}/upwork_manager.py,s3://${BucketName}/s3_utils.py,s3://${BucketName}/python_upwork-2.1.0-py3.7.egg
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1
+      GlueVersion : '1.0'
+      MaxRetries: 0
+      Name: !Sub ${Environment}-${Source}-jobs-data-ingest
+      Role: 
+        Fn::ImportValue:
+          Fn::Sub: "${GlueWorkflowRoleParameter}-Role" 
+      Timeout: 2880
+
+  JobsDataCurated:
+    Type: AWS::Glue::Job
+    Properties: 
+      Command:
+        Name: glueetl
+        ScriptLocation: !Sub s3://${BucketName}/fa_curated_data.py
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1
+      GlueVersion : '2.0'
+      WorkerType: "G.1X" 
+      NumberOfWorkers: 2
+      MaxRetries: 0
+      Name: !Sub ${Environment}-${Source}-jobs-data-curated
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-disable"
+      Role: 
+        Fn::ImportValue:
+          Fn::Sub: "${GlueWorkflowRoleParameter}-Role"
+      Timeout: 2880
+
+  FreelancerDataIngest:
+    Type: AWS::Glue::Job
+    Properties: 
+      Command:
+        Name: pythonshell
+        PythonVersion: '3'
+        ScriptLocation: !Sub s3://${BucketName}/main1.py
+      DefaultArguments:
+        "--workflow_name": !Sub ${Environment}-${Source}-freelancer-workflow
+        "--extra-py-files": !Sub s3://${BucketName}/upwork_manager.py,s3://${BucketName}/s3_utils.py,s3://${BucketName}/python_upwork-2.1.0-py3.7.egg
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1
+      GlueVersion : '1.0'
+      MaxRetries: 0
+      Name: !Sub ${Environment}-${Source}-freelancer-data-ingest
+      Role: 
+        Fn::ImportValue:
+          Fn::Sub: "${GlueWorkflowRoleParameter}-Role"
+      Timeout: 2880
+
+  FreelanceDataCurated:
+    Type: AWS::Glue::Job
+    Properties: 
+      Command:
+        Name: glueetl
+        ScriptLocation: !Sub s3://${BucketName}/fa_freelance_curated_data.py
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1
+      GlueVersion : '2.0'
+      WorkerType: "G.1X" 
+      NumberOfWorkers: 2
+      MaxRetries: 0
+      Name: !Sub ${Environment}-${Source}-freelancer-data-curated
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-disable"
+      Role: 
+        Fn::ImportValue:
+          Fn::Sub: "${GlueWorkflowRoleParameter}-Role"
+      Timeout: 2880
+
+###########################################################################
+ # AWS Glue Workflows
+###########################################################################   
+
+  JobsWorkflow:
+    Type: AWS::Glue::Workflow
+    Properties:
+      Description: Fetching raw data from api and transforming the data into s3 bucket
+      Name: !Sub ${Environment}-${Source}-jobs-workflow
+
+  freelanceWorkflow:
+    Type: AWS::Glue::Workflow
+    Properties:
+      Description: Getting freelancer data from api and transforming freelancer raw data
+      Name: !Sub ${Environment}-${Source}-freelancer-workflow
+
+###########################################################################
+ # AWS Glue Triggers
+###########################################################################      
+
+  JobsIngestTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Type: SCHEDULED
+      Schedule: cron(00 0/1 * * ? *)
+      WorkflowName: !Ref JobsWorkflow
+      StartOnCreation: 'true'
+      Actions:
+        - JobName: !Sub ${Environment}-${Source}-jobs-data-ingest
+      Name: !Sub ${Environment}-${Source}-jobs-trigger
+
+  JobsTransformationTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Type: CONDITIONAL
+      WorkflowName: !Ref JobsWorkflow
+      StartOnCreation: 'true'
+      Actions:
+        - JobName: !Sub ${Environment}-${Source}-jobs-data-curated
+      Name: !Sub ${Environment}-${Source}-jobs-transformation-trigger
+      Predicate:
+        Conditions:
+          - LogicalOperator: EQUALS
+            JobName: !Sub ${Environment}-${Source}-jobs-data-ingest
+            State: SUCCEEDED
+
+  FreelanceIngestTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Type: SCHEDULED
+      Schedule: cron(00 00 ? * MON *)
+      WorkflowName: !Ref freelanceWorkflow
+      StartOnCreation: 'true'
+      Actions:
+        - JobName: !Sub ${Environment}-${Source}-freelancer-data-ingest
+      Name: !Sub ${Environment}-${Source}-freelancer-trigger
+
+  FreelanceTransformationTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Type: CONDITIONAL
+      WorkflowName: !Ref freelanceWorkflow
+      StartOnCreation: 'true'
+      Actions:
+        - JobName: !Sub ${Environment}-${Source}-freelancer-data-curated
+      Predicate:
+        Conditions:
+          - LogicalOperator: EQUALS
+            JobName: !Sub ${Environment}-${Source}-freelancer-data-ingest
+            State: SUCCEEDED
+      Name: !Sub ${Environment}-${Source}-freelancer-transformation-trigger

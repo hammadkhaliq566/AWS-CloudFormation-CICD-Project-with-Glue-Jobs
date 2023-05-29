@@ -1,0 +1,177 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Cloudformation template to create a CodePipeline to deploy CloudFormation Stack
+Parameters:
+  Environment:
+    Description: Parameter for environment prefix, default value dev
+    Type: String
+    Default: dev
+  GitHubOwner:
+    Description: Name of GitHub Owner
+    Type: String
+    Default: hammadkhaliq566
+  GitHubRepo:
+    Description: Name of GitHub Repo
+    Type: String
+    Default: demo
+  GitHubBranch:
+    Description: Name of GitHub Repo Branch
+    Type: String
+    Default: main
+  GitHubOAuthToken:
+    Type: String
+    NoEcho: true
+    Default: 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
+  BuckerName:
+    Description: S3 Bucket Name
+    Type: String
+    Default: freelance-analytics-codebase
+
+Resources:
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: codepipeline.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  CloudformationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: cloudformation.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  S3Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: s3.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  GithubWebhook:
+    Type: 'AWS::CodePipeline::Webhook'
+    Properties:
+      Authentication: GITHUB_HMAC
+      AuthenticationConfiguration:
+          SecretToken: !Ref GitHubOAuthToken
+      RegisterWithThirdParty: 'true'
+      Filters:
+      - JsonPath: "$.ref"
+        MatchEquals: refs/heads/{Branch}
+      TargetPipeline: !Ref CodePipeline
+      TargetAction: Source
+      TargetPipelineVersion: !GetAtt CodePipeline.Version
+
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: GluePipeline
+      ArtifactStore:
+        Type: S3
+        Location: !Sub ${BuckerName}
+      RestartExecutionOnUpdate: true
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      Stages:
+      - Name: Source
+        Actions:
+        - Name: Source
+          InputArtifacts: []
+          ActionTypeId:
+            Category: Source
+            Owner: ThirdParty
+            Version: 1
+            Provider: GitHub
+          OutputArtifacts:
+          - Name: SourceCode
+          Configuration:
+            Owner: !Ref GitHubOwner
+            Repo: !Ref GitHubRepo
+            Branch: !Ref GitHubBranch
+            PollForSourceChanges: false
+            OAuthToken: !Ref GitHubOAuthToken
+          RunOrder: 1
+
+      - Name: Deploy
+        Actions:
+        - Name: Common
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Provider: CloudFormation
+            Version: '1'
+          InputArtifacts:
+            - Name: SourceCode
+          Configuration:
+            ActionMode: CREATE_UPDATE
+            Capabilities: CAPABILITY_NAMED_IAM
+            RoleArn: !GetAtt CloudformationRole.Arn
+            StackName: common-stack-dev
+            TemplatePath: !Sub "SourceCode::common.yml"
+          RunOrder: 1
+
+        - Name: Upwork
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Provider: CloudFormation
+            Version: '1'
+          InputArtifacts:
+            - Name: SourceCode
+          Configuration:
+            ActionMode: CREATE_UPDATE
+            Capabilities: CAPABILITY_NAMED_IAM
+            RoleArn: !GetAtt CloudformationRole.Arn
+            StackName: upwork-stack-dev
+            TemplatePath: !Sub "SourceCode::upwork.yml"
+            ParameterOverrides: "{\"GlueWorkflowRoleParameter\": \"common-stack-dev\"}"
+          RunOrder: 2
+
+        - Name: Guru
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Provider: CloudFormation
+            Version: '1'
+          InputArtifacts:
+            - Name: SourceCode
+          Configuration:
+            ActionMode: CREATE_UPDATE
+            Capabilities: CAPABILITY_NAMED_IAM
+            RoleArn: !GetAtt CloudformationRole.Arn
+            StackName: guru-stack-dev
+            TemplatePath: !Sub "SourceCode::guru.yml"
+            ParameterOverrides: "{\"GlueWorkflowRoleParameter\": \"common-stack-dev\"}"
+          RunOrder: 2
+
+        - Name: DeploytoS3
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Provider: S3
+            Version: '1'
+          InputArtifacts:
+            - Name: SourceCode
+          Configuration:
+            BucketName: !Sub ${BuckerName}
+            Key: dev
+            Extract: 'true'
+          RunOrder: 3
